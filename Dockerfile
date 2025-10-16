@@ -1,25 +1,18 @@
-# Use official Python runtime
 FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PORT=8080
 
-WORKDIR /app
+# Install the Twelve Data MCP server from PyPI
+RUN pip install --no-cache-dir mcp-server-twelve-data
 
-# (A) Build from source in this repo (what you have now)
-RUN pip install --upgrade pip uv
-COPY pyproject.toml uv.lock* README.md LICENSE ./   # ok if some files are missing
-COPY src ./src
-RUN uv pip install . --system
-
-# Expose the port Render will connect to
+# Expose Render port (not strictly required, but nice)
 EXPOSE ${PORT}
 
-# Start the MCP server in Streamable HTTP mode,
-# binding to 0.0.0.0 and using Render's $PORT and your env keys.
-# (Use shell form so ${PORT} and env vars expand.)
-CMD bash -lc 'python -m mcp_server_twelve_data \
+# Start the server in Streamable HTTP mode, bind to 0.0.0.0:$PORT,
+# and read your keys from Render env vars.
+CMD bash -lc 'mcp-server-twelve-data \
   -t streamable-http \
   -b 0.0.0.0 \
   -p ${PORT} \
