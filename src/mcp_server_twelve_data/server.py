@@ -129,65 +129,6 @@ def serve(
     @server.custom_route("/health", ["GET"])
     async def health(_: Request):
         return JSONResponse({"status": "ok"})
-    # Relay that auto-retries once on "Session terminated"
-    @server.custom_route("/mcp_retry", ["POST"])
-    async def mcp_retry(request: Request):
-        """
-        A small wrapper around the built-in /mcp endpoint that:
-          - forwards the original JSON-RPC body
-          - if it gets -32600 "Session terminated", it re-initializes and replays once
-        """
-        try:
-            body = await request.json()
-        except Exception:
-            return JSONResponse(
-                {"jsonrpc": "2.0", "id": "parse-error",
-                 "error": {"code": -32700, "message": "Invalid JSON"}},
-                status_code=200
-            )
 
-        # Forward headers we need (Authorization + Accept are important for Streamable HTTP)
-        fwd_headers = {
-            "Authorization": request.headers.get("Authorization", ""),
-            "Content-Type": "application/json",
-            "Accept": request.headers.get("Accept", "application/json, text/event-stream"),
-        }
-
-        async def call_mcp(payload):
-            async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
-                r = await client.post(
-                    "http://127.0.0.1:8000/mcp",  # call the local MCP endpoint
-                    headers=fwd_headers,
-                    json=payload
-                )
-                # Return raw JSON (even on error)
-                try:
-                    return r.json()
-                except Exception:
-                    return {"jsonrpc": "2.0", "id": "relay-error",
-                            "error": {"code": -32603, "message": "Relay parse error"}}
-
-        # 1) First attempt
-        out = await call_mcp(body)
-        err = (out or {}).get("error", {})
-        msg = (err.get("message") or "")
-
-        if err.get("code") == -32600 and "Session terminated" in msg:
-            # 2) Re-initialize then retry once
-            await asyncio.sleep(0.8)  # tiny backoff
-            init = {
-                "jsonrpc": "2.0",
-                "id": "relay-init",
-                "method": "initialize",
-                "params": {
-                    "clientInfo": {"name": "relay", "version": "1.0.0"},
-                    "protocolVersion": "2024-11-05"
-                }
-            }
-            _ = await call_mcp(init)
-
-            out = await call_mcp(body)
-
-        return JSONResponse(out, status_code=200)
 
     server.run(transport=transport)
